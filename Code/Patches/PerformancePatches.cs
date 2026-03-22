@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection.Emit;
 using HarmonyLib;
@@ -12,6 +13,12 @@ namespace VulkanMod.Code.Patches
             if (pOption == DebugOption.ParallelJobsUpdater || pOption == DebugOption.ParallelChunks)
             {
                 __result = true;
+                return;
+            }
+
+            if (pOption == DebugOption.ScaleEffectEnabled || pOption == DebugOption.LavaGlow)
+            {
+                __result = false;
             }
         }
     }
@@ -22,6 +29,45 @@ namespace VulkanMod.Code.Patches
         private static void Prefix()
         {
             RuntimeTuner.ApplyFrameCriticalSettings();
+        }
+    }
+
+    [HarmonyPatch(typeof(MapBox), "calculateVisibleObjects")]
+    internal static class ConcurrentVisibleObjectsPatch
+    {
+        private static bool Prefix(MapBox __instance)
+        {
+            return !RuntimeTuner.TryRunConcurrentVisibility(__instance);
+        }
+    }
+
+    [HarmonyPatch(typeof(NameplateManager), "update")]
+    internal static class DisableNameplateUpdatesPatch
+    {
+        private static bool Prefix(NameplateManager __instance)
+        {
+            RuntimeTuner.PrepareNameplatesForDisable(__instance);
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(QuantumSpriteManager), "updateScaleEffect")]
+    internal static class DisableQuantumScaleEffectPatch
+    {
+        private static bool Prefix()
+        {
+            RuntimeTuner.NoteQuantumScaleEffectsDisabled();
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(MapBox), "resetRedrawTimer")]
+    internal static class ThrottleRedrawTimerResetPatch
+    {
+        private static bool Prefix(MapBox __instance)
+        {
+            __instance._redraw_timer = RuntimeTuner.GetMinimapRedrawInterval();
+            return false;
         }
     }
 
@@ -43,6 +89,15 @@ namespace VulkanMod.Code.Patches
         }
     }
 
+    [HarmonyPatch(typeof(MapBox), "renderStuff")]
+    internal static class MinimapRenderIntervalPatch
+    {
+        private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            return FloatConstantTranspiler.ReplaceFixedMinimapInterval(instructions);
+        }
+    }
+
     internal static class BatchSizeTranspiler
     {
         private static readonly System.Reflection.MethodInfo BatchSizeMethod =
@@ -58,6 +113,32 @@ namespace VulkanMod.Code.Patches
                 {
                     replaced = true;
                     yield return new CodeInstruction(OpCodes.Call, BatchSizeMethod);
+                    continue;
+                }
+
+                yield return instruction;
+            }
+        }
+    }
+
+    internal static class FloatConstantTranspiler
+    {
+        private static readonly System.Reflection.MethodInfo MinimapIntervalMethod =
+            AccessTools.Method(typeof(RuntimeTuner), "GetMinimapRedrawInterval");
+
+        internal static IEnumerable<CodeInstruction> ReplaceFixedMinimapInterval(IEnumerable<CodeInstruction> instructions)
+        {
+            bool replaced = false;
+
+            foreach (CodeInstruction instruction in instructions)
+            {
+                object operand = instruction.operand;
+                bool hasTargetValue = operand is float && Math.Abs((float)operand - 0.001f) < 0.0001f;
+
+                if (!replaced && instruction.opcode == OpCodes.Ldc_R4 && hasTargetValue)
+                {
+                    replaced = true;
+                    yield return new CodeInstruction(OpCodes.Call, MinimapIntervalMethod);
                     continue;
                 }
 
