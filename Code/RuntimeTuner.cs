@@ -11,21 +11,17 @@ namespace VulkanMod.Code
     internal static class RuntimeTuner
     {
         private const float MinimapRedrawIntervalSeconds = 0.05f;
-        private const float StatusLogIntervalSeconds = 15f;
 
         private static bool _loggedThreadPlan;
         private static bool _loggedBatchPlan;
-        private static bool _loggedConcurrentVisibilityPlan;
         private static bool _loggedAggressiveVisualPlan;
         private static bool _loggedMinimapPlan;
         private static bool _loggedNameplatePlan;
         private static bool _loggedScaleEffectPlan;
         private static bool _loggedQualityRollbackPlan;
         private static float _nextDenseWorldRetuneAt;
-        private static float _nextStatusLogAt;
         private static int _lastActorDensityTier = -1;
         private static int _lastBuildingDensityTier = -1;
-        private static bool _disableConcurrentVisibility;
 
         internal static void Apply()
         {
@@ -38,7 +34,6 @@ namespace VulkanMod.Code
             ConfigureUnityJobWorkers();
             WarmThreadPool();
             TuneDenseWorldSimulation();
-            LogLiveStatusIfDue();
         }
 
         internal static void ApplyFrameCriticalSettings()
@@ -48,7 +43,6 @@ namespace VulkanMod.Code
             ConfigureParallelOptions();
             ConfigureUnityJobWorkers();
             TuneDenseWorldSimulation();
-            LogLiveStatusIfDue();
         }
 
         private static void ForceWorldBoxParallelFlags()
@@ -251,100 +245,6 @@ namespace VulkanMod.Code
             }
 
             return MinimapRedrawIntervalSeconds;
-        }
-
-        internal static void LogStartupSummary()
-        {
-            VulkanMod.LogInfo(
-                string.Format(
-                    "Startup summary: parallelJobs={0}, parallelChunks={1}, threadedTextures={2}, lowRes={3}, shadows={4}, spriteAnimations={5}, bench={6}, minimapInterval={7:0.000}s, renderBatch={8}, workers={9}, unityJobs={10}.",
-                    Config.parallel_jobs_updater,
-                    Config.parallel_chunk_manager,
-                    Texture.allowThreadedTextureCreation,
-                    IsLowResActive(),
-                    Config.shadows_active,
-                    Config.sprite_animations_on,
-                    Bench.bench_enabled,
-                    MinimapRedrawIntervalSeconds,
-                    GetDynamicRenderBatchSize(),
-                    GetDesiredWorkerCount(),
-                    JobsUtility.JobWorkerCount
-                )
-            );
-        }
-
-        internal static void LogLiveStatusIfDue(bool force = false)
-        {
-            if (MapBox.instance == null)
-            {
-                return;
-            }
-
-            if (!force && Time.unscaledTime < _nextStatusLogAt)
-            {
-                return;
-            }
-
-            _nextStatusLogAt = Time.unscaledTime + StatusLogIntervalSeconds;
-            VulkanMod.LogInfo(GetLiveStatusSummary());
-        }
-
-        internal static string GetLiveStatusSummary()
-        {
-            int actorCount = 0;
-            int visibleActorCount = 0;
-            int buildingCount = 0;
-            int visibleBuildingCount = 0;
-            int actorTier = 0;
-            int buildingTier = 0;
-            int worldWorkers = 0;
-
-            if (MapBox.instance != null)
-            {
-                if (MapBox.instance.units != null)
-                {
-                    actorCount = MapBox.instance.units.units_only_alive != null ? MapBox.instance.units.units_only_alive.Count : 0;
-                    visibleActorCount = MapBox.instance.units.visible_units != null ? MapBox.instance.units.visible_units.count : 0;
-                    actorTier = GetActorDensityTier(actorCount);
-                }
-
-                if (MapBox.instance.buildings != null)
-                {
-                    buildingCount = MapBox.instance.buildings.occupied_buildings != null ? MapBox.instance.buildings.occupied_buildings.Count : 0;
-                    visibleBuildingCount = MapBox.instance.buildings._visible_buildings_count;
-                    buildingTier = GetBuildingDensityTier(buildingCount);
-                }
-
-                if (MapBox.instance.parallel_options != null)
-                {
-                    worldWorkers = MapBox.instance.parallel_options.MaxDegreeOfParallelism;
-                }
-            }
-
-            return string.Format(
-                "Live status: actors={0} visibleActors={1} actorTier={2} buildings={3} visibleBuildings={4} buildingTier={5} worldWorkers={6} unityJobs={7} lowRes={8} minimapInterval={9:0.000}s concurrentVisibility={10} targetScanSkip={11} aiSkip={12} buildingSpreadSkip={13}.",
-                actorCount,
-                visibleActorCount,
-                actorTier,
-                buildingCount,
-                visibleBuildingCount,
-                buildingTier,
-                worldWorkers,
-                JobsUtility.JobWorkerCount,
-                IsLowResActive(),
-                MinimapRedrawIntervalSeconds,
-                _disableConcurrentVisibility ? "fallback" : "enabled",
-                GetActorJobRandomSkips("b3_findEnemyTarget", actorTier),
-                GetActorJobRandomSkips("b6_update_ai", actorTier),
-                GetBuildingJobRandomSkips("update_spread_trees", buildingTier)
-            );
-        }
-
-        private static bool IsLowResActive()
-        {
-            return MapBox.instance != null
-                && MapBox.instance.quality_changer != null
-                && MapBox.instance.quality_changer.isLowRes();
         }
 
         private static void TuneDenseWorldSimulation()
@@ -603,11 +503,6 @@ namespace VulkanMod.Code
 
             manager.clearAll();
 
-            if (manager.gameObject.activeSelf)
-            {
-                manager.gameObject.SetActive(false);
-            }
-
             if (_loggedNameplatePlan)
             {
                 return;
@@ -628,62 +523,5 @@ namespace VulkanMod.Code
             VulkanMod.LogInfo("City and kingdom hover scale effects disabled.");
         }
 
-        internal static bool TryRunConcurrentVisibility(MapBox mapBox)
-        {
-            if (_disableConcurrentVisibility || mapBox == null || mapBox.parallel_options == null)
-            {
-                return false;
-            }
-
-            int totalWorkers = GetDesiredWorkerCount();
-            if (totalWorkers < 4 || mapBox.buildings == null || mapBox.units == null)
-            {
-                return false;
-            }
-
-            int previousDegree = mapBox.parallel_options.MaxDegreeOfParallelism;
-            int splitWorkers = Math.Max(1, totalWorkers / 2);
-
-            if (!_loggedConcurrentVisibilityPlan)
-            {
-                _loggedConcurrentVisibilityPlan = true;
-                VulkanMod.LogInfo(
-                    string.Format(
-                        "Running actor/building visibility concurrently with {0} workers per branch.",
-                        splitWorkers
-                    )
-                );
-            }
-
-            try
-            {
-                mapBox.parallel_options.MaxDegreeOfParallelism = splitWorkers;
-                Parallel.Invoke(
-                    new ParallelOptions
-                    {
-                        MaxDegreeOfParallelism = 2,
-                        CancellationToken = mapBox.parallel_options.CancellationToken
-                    },
-                    delegate { mapBox.buildings.calculateVisibleBuildings(); },
-                    delegate { mapBox.units.calculateVisibleActors(); }
-                );
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _disableConcurrentVisibility = true;
-                VulkanMod.LogWarning(
-                    string.Format(
-                        "Concurrent visibility path failed and was disabled: {0}",
-                        ex.Message
-                    )
-                );
-                return false;
-            }
-            finally
-            {
-                mapBox.parallel_options.MaxDegreeOfParallelism = previousDegree;
-            }
-        }
     }
 }

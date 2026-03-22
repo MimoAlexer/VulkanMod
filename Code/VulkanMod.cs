@@ -10,29 +10,23 @@ namespace VulkanMod.Code
 
         private float _nextReapplyAt;
         private bool _loggedGraphicsState;
-        private bool _loggedStartupSummary;
 
         protected override void OnModLoad()
         {
             HarmonyBootstrap.Apply();
             RuntimeTuner.Apply();
-            LogInfo("Performance hooks enabled. Watch the next startup/live status lines to verify the mod is active.");
+            LogInfo("Performance hooks enabled.");
         }
 
         public void Start()
         {
             RuntimeTuner.Apply();
-            LogStartupSummary();
+            LogInfo("Runtime tuner started.");
             LogGraphicsState();
         }
 
         public void Update()
         {
-            if (!_loggedStartupSummary)
-            {
-                LogStartupSummary();
-            }
-
             if (Time.unscaledTime < _nextReapplyAt)
             {
                 return;
@@ -41,18 +35,6 @@ namespace VulkanMod.Code
             _nextReapplyAt = Time.unscaledTime + ReapplyIntervalSeconds;
             RuntimeTuner.Apply();
             LogGraphicsState();
-        }
-
-        private void LogStartupSummary()
-        {
-            if (_loggedStartupSummary)
-            {
-                return;
-            }
-
-            _loggedStartupSummary = true;
-            RuntimeTuner.LogStartupSummary();
-            RuntimeTuner.LogLiveStatusIfDue(true);
         }
 
         private void LogGraphicsState()

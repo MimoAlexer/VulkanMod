@@ -32,15 +32,6 @@ namespace VulkanMod.Code.Patches
         }
     }
 
-    [HarmonyPatch(typeof(MapBox), "calculateVisibleObjects")]
-    internal static class ConcurrentVisibleObjectsPatch
-    {
-        private static bool Prefix(MapBox __instance)
-        {
-            return !RuntimeTuner.TryRunConcurrentVisibility(__instance);
-        }
-    }
-
     [HarmonyPatch(typeof(NameplateManager), "update")]
     internal static class DisableNameplateUpdatesPatch
     {
