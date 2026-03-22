@@ -1,0 +1,8 @@
+{
+  "name": "Vulkan Performance Mod",
+  "author": "lehma",
+  "version": "0.1.0",
+  "description": "Forces WorldBox's built-in parallel updater path on, enables threaded texture creation, and reports the active graphics backend. Unity graphics API selection still has to happen at process start.",
+  "GUID": "LEHMA_VULKAN_PERFORMANCE_MOD",
+  "UsePublicizedAssembly": true
+}
