@@ -20,6 +20,7 @@ namespace VulkanMod.Code
         private static bool _loggedMinimapPlan;
         private static bool _loggedNameplatePlan;
         private static bool _loggedScaleEffectPlan;
+        private static bool _loggedQualityRollbackPlan;
         private static float _nextDenseWorldRetuneAt;
         private static float _nextStatusLogAt;
         private static int _lastActorDensityTier = -1;
@@ -79,11 +80,11 @@ namespace VulkanMod.Code
 
             QualitySettings.antiAliasing = 0;
             QualitySettings.anisotropicFiltering = AnisotropicFiltering.Disable;
-            QualitySettings.masterTextureLimit = Math.Max(QualitySettings.masterTextureLimit, 1);
+            QualitySettings.masterTextureLimit = 0;
             QualitySettings.pixelLightCount = 0;
             QualitySettings.shadowDistance = 0f;
 
-            ForceLowResolutionMode();
+            RollBackForcedLowResolutionMode();
 
             if (_loggedAggressiveVisualPlan)
             {
@@ -92,21 +93,29 @@ namespace VulkanMod.Code
 
             _loggedAggressiveVisualPlan = true;
             VulkanMod.LogInfo(
-                "Aggressive quality cuts enabled: low resolution, shadows off, sprite animations off, city scale effects off, and reduced render quality."
+                "Aggressive quality cuts enabled: shadows off, sprite animations off, city scale effects off, and reduced render quality."
             );
         }
 
-        private static void ForceLowResolutionMode()
+        private static void RollBackForcedLowResolutionMode()
         {
             if (MapBox.instance == null || MapBox.instance.quality_changer == null)
             {
                 return;
             }
 
-            if (!MapBox.instance.quality_changer.isLowRes())
+            if (MapBox.instance.quality_changer.isLowRes())
             {
-                MapBox.instance.quality_changer.setLowRes(true);
+                MapBox.instance.quality_changer.setLowRes(false);
             }
+
+            if (_loggedQualityRollbackPlan)
+            {
+                return;
+            }
+
+            _loggedQualityRollbackPlan = true;
+            VulkanMod.LogInfo("Forced low-resolution zoom transitions disabled for stability.");
         }
 
         private static void TuneFramePacing()
